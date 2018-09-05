@@ -21,3 +21,11 @@
 # SOFTWARE.
 
 from .__version__ import *
+
+from .spec import (
+    OASpec
+)
+
+__all__ = (
+    "OASpec",
+)
