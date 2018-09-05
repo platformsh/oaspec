@@ -1,4 +1,4 @@
-# pyskeleton
+# oaspec
 
 Project description
 
