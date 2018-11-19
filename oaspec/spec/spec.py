@@ -11,6 +11,7 @@ from typing import Optional, Union, MutableMapping
 # from collections.abc import MutableMapping as CollectionMutableMapping
 from ruamel.yaml.comments import CommentedMap
 
+from .fields import OASpecInfo
 
 class OASpec(object):
     """The top-level object for manipulating OpenAPI specifications.
@@ -138,7 +139,4 @@ class OASpecParser(object):
         if "info" not in self.raw_spec:
             raise OASpecParserError("No value specified for required field.", "info")
 
-class OASpecInfo(object):
-
-    def __init__(self):
-        pass
+        self.spec_object.info = OASpecInfo(self.raw_spec["info"])
