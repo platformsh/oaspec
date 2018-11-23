@@ -39,6 +39,9 @@ setup(
     packages     = find_packages(),
     #add required packages to install_requires list
     #install_requires=["package","package2"]
+    entry_points = {
+        "console_scripts": ["oaspec = oaspec:main"]
+    },
     # entry_points = {
     #     "console_scripts": ['%s = %s.%s:main' % (__title__,projectName,projectName)]
     #     },

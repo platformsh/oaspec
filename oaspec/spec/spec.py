@@ -10,10 +10,13 @@ from typing import Optional, Union, MutableMapping
 
 # from collections.abc import MutableMapping as CollectionMutableMapping
 from ruamel.yaml.comments import CommentedMap
+import jsonschema
 
-from .fields import OASpecInfo
+from . import schema
+# TODO RM
+# from .fields import OASpecInfo
 
-class OASpec(object):
+class OASpecParser(object):
     """The top-level object for manipulating OpenAPI specifications.
 
     The OASpec object is the entrypoint for creating and manipulating
@@ -39,16 +42,7 @@ class OASpec(object):
         """
 
         self._spec_file: Optional[Path] = None
-        self._raw_spec: Union[dict, CommentedMap, None] = None
-
-        self.openapi: str = None
-        self.info = None
-        self.servers = list()
-        self.paths = None
-        self.components = None
-        self.security = list()
-        self.tags = list()
-        self.externalDocs = None
+        self._schema = type("openapiObject", (schema.Schema,), dict())
 
         if type(spec) is str:
             if (spec.endswith(".yaml") or spec.endswith(".yml") or spec.endswith(".json")):
@@ -64,6 +58,49 @@ class OASpec(object):
                 "`spec` must be a file path, a raw string containing a spec, "
                 "a parsed dictionary of a spec, or the _raw_spec from another OASpec"
             )
+
+    def __setattr__(self, name, value):
+        if name == "_raw_spec":
+            self._process_raw_spec(value)
+        else:
+            self.__dict__[name] = value
+
+    def _process_raw_spec(self, raw_spec):
+        self._validate_spec(raw_spec)
+        self.__dict__["_raw_spec"] = raw_spec
+
+    def _validate_spec(self, raw_spec):
+        self._load_validation_schema(raw_spec["openapi"])
+        print(type(self._validation_schema), type(raw_spec))
+        # jsonschema.validate(dict(raw_spec), self._validation_schema)
+
+        print(self._validation_schema.keys())
+
+    def _load_validation_schema(self, schema_version):
+        specs_dir = Path("specs").resolve()
+        spec_file = specs_dir / "oas-{}.json".format(schema_version)
+
+        if re.fullmatch(r"\A3\.\d{1,2}\.\d{1,2}\Z", schema_version) is None:
+            raise OASpecParserError("Invalid OpenAPI version number. oaspec only supports OpenAPI 3.*.*", "openapi")
+        if not spec_file.exists():
+            available_versions = "\n\t- ".join([f.stem[4:] for f in specs_dir.glob("oas-*.json")])
+            raise OASpecParserError(
+                "Schema file is missing for specified version '{}'.\nSupported versions:\n\t- {}:".format(
+                    schema_version,
+                    available_versions
+                ),
+                "openapi"
+            )
+
+        with spec_file.open("r", encoding="utf-8") as f:
+            self._validation_schema = json.load(f)
+
+        # self._schema = OASchema(self._validation_schema)
+        schema.build_schema(
+            self._validation_schema,
+            schema.Schema,
+            self._schema,
+        )
 
     def load_file(self, spec: str):
         """Load an OpenAPI specification file.
@@ -96,7 +133,8 @@ class OASpec(object):
         self._raw_spec = yaml.load(spec)
 
     def parse_spec(self):
-        OASpecParser(self, self._raw_spec).parse_all()
+        # OASpecParser(self, self._raw_spec).parse_all()
+        return self._schema(self._raw_spec)
 
 
 class OASpecParserError(ValueError):
@@ -109,34 +147,36 @@ class OASpecParserError(ValueError):
         self.msg = msg
         self.field = field
 
-class OASpecParser(object):
-    """Object to parse a raw OpenAPI specification."""
 
-    def __init__(self, spec_object: OASpec, raw_spec: CommentedMap):
 
-        self.spec_object: OASpec = spec_object
-        self.raw_spec: CommentedMap = raw_spec
-
-    def parse_all(self):
-        self.parse_version()
-        self.parse_info()
-
-    def parse_version(self):
-
-        if "swagger" in self.raw_spec:
-            raise OASpecParserError("oaspec only supports OpenAPI >= 3.0.0", "openapi")
-
-        if "openapi" not in self.raw_spec:
-            raise OASpecParserError("No value specified for required field.", "openapi")
-
-        if re.fullmatch(r"\A3\.\d{1,2}\.\d{1,2}\Z", self.raw_spec["openapi"]) is None:
-            raise OASpecParserError("Invalid version number.", "openapi")
-
-        self.spec_object.openapi = self.raw_spec["openapi"]
-
-    def parse_info(self):
-
-        if "info" not in self.raw_spec:
-            raise OASpecParserError("No value specified for required field.", "info")
-
-        self.spec_object.info = OASpecInfo(self.raw_spec["info"])
+# class OASpecParser(object):
+#     """Object to parse a raw OpenAPI specification."""
+#
+#     def __init__(self, spec_object: OASpec, raw_spec: CommentedMap):
+#
+#         self.spec_object: OASpec = spec_object
+#         self.raw_spec: CommentedMap = raw_spec
+#
+#     def parse_all(self):
+#         self.parse_version()
+#         self.parse_info()
+#
+#     def parse_version(self):
+#
+#         if "swagger" in self.raw_spec:
+#             raise OASpecParserError("oaspec only supports OpenAPI >= 3.0.0", "openapi")
+#
+#         if "openapi" not in self.raw_spec:
+#             raise OASpecParserError("No value specified for required field.", "openapi")
+#
+#         if re.fullmatch(r"\A3\.\d{1,2}\.\d{1,2}\Z", self.raw_spec["openapi"]) is None:
+#             raise OASpecParserError("Invalid version number.", "openapi")
+#
+#         self.spec_object.openapi = self.raw_spec["openapi"]
+#
+#     def parse_info(self):
+#
+#         if "info" not in self.raw_spec:
+#             raise OASpecParserError("No value specified for required field.", "info")
+#
+#         self.spec_object.info = OASpecInfo(self.raw_spec["info"])

@@ -23,9 +23,15 @@
 from .__version__ import *
 
 from .spec import (
-    OASpec
+    OASpecParser
 )
 
 __all__ = (
-    "OASpec",
+    "OASpecParser",
 )
+
+def main():
+    import pathlib
+
+    spec_file = pathlib.Path("specs").resolve() / "git-oaspec.json"
+    OASpecParser(str(spec_file))

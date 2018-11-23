@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 
 from .spec import (
-    OASpec
+    OASpecParser,
 )
 
 __all__ = (
-    "OASpec",
+    "OASpecParser",
 )

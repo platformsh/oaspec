@@ -24,3 +24,6 @@ from .__version__ import *
 
 if __name__ != '__main__':
     raise ImportError('Cannot directly import __main__.py')
+
+from .oaspec import main
+main()
