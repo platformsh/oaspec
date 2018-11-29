@@ -12,8 +12,7 @@ class Schema(object):
     def __init__(self, spec):
         self._raw_spec = spec
 
-        if not self.validate(self._raw_spec, True):
-            print("VALIDATION ERROR")
+        self.validate(self._raw_spec, True)
 
         # If the class has the _boolean_subschema attribute set to something
         # other than False, detect which definition is present in the parsed
