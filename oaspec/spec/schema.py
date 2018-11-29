@@ -1,5 +1,19 @@
 # -*- coding: utf-8 -*-
 
+import re
+import jsonschema
+from copy import deepcopy
+
+class OASpecParserError(ValueError):
+
+    def __init__(self, msg, field):
+
+        error_msg = f"Error processing `{field}` field: {msg}"
+        ValueError.__init__(self, error_msg)
+
+        self.msg = msg
+        self.field = field
+
 class Schema(object):
 
     _PRIMITIVES = {
