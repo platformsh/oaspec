@@ -39,13 +39,20 @@ class Schema(object):
                     return
 
         elif self._type in self._PRIMITIVES:
-            self.value = spec
-        elif self._type == "object":
-            self.set_properties()
+            self._value = spec
+        elif self._type == "enum":
+            if spec in self._enum:
+                self._value = spec
+            else:
+                raise TypeError(f"Value {spec} not in {self._enum}")
         elif self._type == "array":
             # Create a new object for each item in the array using the class
             # specified in the _items attribute
-            self.value = [self._items(item) for item in spec]
+            self._value = [self._items(item) for item in spec]
+        elif not isinstance(spec, dict):
+            self._value = spec
+        else:
+            self.set_properties()
 
     def set_properties(self):
         if not hasattr(self, "_present_properties"):
@@ -79,6 +86,8 @@ class Schema(object):
         if self._additional_properties is not False:
             for prop, value in self._raw_spec.items():
                 if prop in self._present_properties:
+                    continue
+                elif prop == "$schema":
                     continue
 
                 self._present_properties.add(prop)
@@ -125,20 +134,22 @@ class Schema(object):
         Returns:
             dict: A dict computed from properties present in the object as attributes.
         """
-        if name == "value":
-            if self._type == "object":
-                return {key:getattr(self, key) for key in self._present_properties}
+        if name == "_value":
+            return {key:getattr(self, key) for key in self._present_properties}
 
         raise AttributeError(f"Property {name} not present in specification")
 
     def __repr__(self):
-        return str(self.value)
+        return str(self._value)
+
+    def __eq__(self, other):
+        return self._value == other
 
     def __getitem__(self, key):
         if self._type == "object":
             return getattr(self, key)
         elif self._type == "array":
-            return self.value[key]
+            return self._value[key]
 
         raise TypeError(f"{self.__name__} does not support indexing")
 
@@ -312,6 +323,9 @@ def build_schema(schema, schema_base, schema_class, object_defs=None):
     schema_class._validation_schema = schema.get("$schema", "")
     schema_class._description = schema.get("description", "")
     schema_class._type = schema.get("type", "")
+    if not schema_class._type and "enum" in schema:
+        schema_class._type = "enum"
+        schema_class._enum = schema.get("enum")
     schema_class._required = set(schema.get("required", []))
 
 

@@ -38,7 +38,9 @@ setup(
 
     packages     = find_packages(),
     #add required packages to install_requires list
-    #install_requires=["package","package2"]
+    install_requires=[
+        "jsonschema==2.6.0",
+    ],
     entry_points = {
         "console_scripts": ["oaspec = oaspec:main"]
     },

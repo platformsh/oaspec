@@ -21,7 +21,7 @@
 # SOFTWARE.
 
 __version__      = '0.1.0'
-__version_date__ = '2018-09-07'
+__version_date__ = '2018-11-29'
 
 __title__        = 'oaspec'
 __description__  = 'A package of manipulating OpenAPI specifications in Python'
