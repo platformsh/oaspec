@@ -135,6 +135,7 @@ class Schema(object):
             dict: A dict computed from properties present in the object as attributes.
         """
         if name == "_value":
+            # if self._type == "object" or getattr(self, "_present_properties", False):
             return {key:getattr(self, key) for key in self._present_properties}
 
         raise AttributeError(f"Property {name} not present in specification")
