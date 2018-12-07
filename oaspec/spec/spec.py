@@ -13,8 +13,9 @@ from typing import Optional, Union, MutableMapping
 from ruamel.yaml.comments import CommentedMap
 import jsonschema
 
-from . import schema
-from .schema import OASpecParserError
+from ..__version__ import __root_dir__
+from .. import schema
+from ..schema import OASpecParserError
 
 class OASpecParser(object):
     """The top-level object for manipulating OpenAPI specifications.
@@ -42,7 +43,7 @@ class OASpecParser(object):
         """
 
         self._spec_file: Optional[Path] = None
-        self._schema = type("openapiObject", (schema.Schema,), dict())
+        self._schema = type("openapiObject", (schema.Schema,), dict()) #schema.OASchema
 
         if type(spec) is str:
             if (spec.endswith(".yaml") or spec.endswith(".yml") or spec.endswith(".json")):
@@ -73,7 +74,7 @@ class OASpecParser(object):
         self._load_validation_schema(raw_spec["openapi"])
 
     def _load_validation_schema(self, schema_version):
-        specs_dir = Path("specs").resolve()
+        specs_dir = __root_dir__ / "specs"
         spec_file = specs_dir / "oas-{}.json".format(schema_version)
 
         if re.fullmatch(r"\A3\.\d{1,2}\.\d{1,2}\Z", schema_version) is None:
@@ -127,5 +128,5 @@ class OASpecParser(object):
 
         self._raw_spec = yaml.load(spec)
 
-    def parse_spec(self):
-        return self._schema(self._raw_spec)
+    def parse_spec(self, gentle_validation=False):
+        return self._schema(self._raw_spec, gentle_validation=gentle_validation)

@@ -20,6 +20,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+from pathlib import Path
+
 __version__      = '0.1.0'
 __version_date__ = '2018-11-29'
 
@@ -32,6 +34,8 @@ __author_email__ = 'nick.anderegg@platform.sh'
 
 __license__      = 'MIT'
 __copyright__    = 'Copyright 2018 Platform.sh'
+
+__root_dir__     = Path(__file__).parent.parent.resolve()
 
 __all__ = [
     '__version__', '__version_date__',

@@ -3,16 +3,14 @@
 import re
 import jsonschema
 from copy import deepcopy
+from warnings import warn
+from io import StringIO, IOBase
+from pathlib import Path
+import json
 
-class OASpecParserError(ValueError):
-
-    def __init__(self, msg, field):
-
-        error_msg = f"Error processing `{field}` field: {msg}"
-        ValueError.__init__(self, error_msg)
-
-        self.msg = msg
-        self.field = field
+from .exceptions import OASpecParserError, OASpecParserWarning
+from .funcs import def_key, get_all_refs, get_def_classes, schema_hash
+from ..utils import yaml
 
 class Schema(object):
 
@@ -23,10 +21,16 @@ class Schema(object):
         "integer",
     }
 
-    def __init__(self, spec):
-        self._raw_spec = spec
+    def __init__(self, spec, path=None, gentle_validation=False):
+        self._raw_spec = deepcopy(spec)
 
-        self.validate(self._raw_spec, True)
+        try:
+            self.validate(self._raw_spec, True)
+            self._gentle_validation = False
+        except jsonschema.ValidationError as e:
+            if not gentle_validation:
+                raise e
+            self._gentle_validation = False
 
         # If the class has the _boolean_subschema attribute set to something
         # other than False, detect which definition is present in the parsed
@@ -35,10 +39,14 @@ class Schema(object):
             for subschema_cls in self._boolean_subschema_classes:
                 if subschema_cls.validate(self._raw_spec):
                     self.__class__ = subschema_cls
-                    self.__init__(self._raw_spec)
+                    self.__init__(self._raw_spec, path, self._gentle_validation)
                     return
 
-        elif self._type in self._PRIMITIVES:
+            raise RuntimeError("Could not find matching subschema")
+
+        self._path = deepcopy(path) if path else []
+
+        if self._type in self._PRIMITIVES:
             self._value = spec
         elif self._type == "enum":
             if spec in self._enum:
@@ -48,25 +56,39 @@ class Schema(object):
         elif self._type == "array":
             # Create a new object for each item in the array using the class
             # specified in the _items attribute
-            self._value = [self._items(item) for item in spec]
+            self._value = [
+                self._items(
+                    item,
+                    self._generate_path("array"),
+                    self._gentle_validation
+                ) for item in spec
+            ]
         elif not isinstance(spec, dict):
-            self._value = spec
+            self._value = deepcopy(spec)
         else:
-            self.set_properties()
+            self._set_properties()
+            self._set_object_methods()
 
-    def set_properties(self):
-        if not hasattr(self, "_present_properties"):
-            self._present_properties = set()
+    def _set_properties(self):
+        # if not hasattr(self, "_present_properties"):
+        self._present_properties = set()
+        self._object_properties = dict()
 
         # Set named properties by looking at each property present
         # in the schema definition and checking if it exists in the spec
-        for prop, prop_class in self._properties.items():
-            if prop in self._raw_spec:
+        # for prop, prop_class in self._properties.items():
+        #     if prop in self._raw_spec:
+        #         self._present_properties.add(prop)
+        #         # setattr(self, prop, prop_class(self._raw_spec[prop]))
+        #         self._object_properties[prop] = prop_class(self._raw_spec[prop], self._generate_path(prop), self._gentle_validation)
+        #     else:
+        #         if prop in self._required:
+        #             raise OASpecParserError("Missing required field.", prop)
+
+        for prop, value in self._raw_spec.items():
+            if prop in self._properties:
                 self._present_properties.add(prop)
-                setattr(self, prop, prop_class(self._raw_spec[prop]))
-            else:
-                if prop in self._required:
-                    raise OASpecParserError("Missing required field.", prop)
+                self._object_properties[prop] = self._properties[prop](value, self._generate_path(prop), self._gentle_validation)
 
         # Set patterned properties by checking each key in the spec that hasn't
         # already been parsed and checking if it matches the pattern. Create
@@ -78,7 +100,8 @@ class Schema(object):
 
                 if self._compiled_patterns[pattern].search(prop):
                     self._present_properties.add(prop)
-                    setattr(self, prop, prop_class(value))
+                    # setattr(self, prop, prop_class(value))
+                    self._object_properties[prop] = prop_class(value, self._generate_path(prop), self._gentle_validation)
 
 
         # Set additional properties by parsing every key in the spec that
@@ -91,7 +114,128 @@ class Schema(object):
                     continue
 
                 self._present_properties.add(prop)
-                setattr(self, prop, self._additional_properties(value))
+                # setattr(self, prop, self._additional_properties(value))
+                self._object_properties[prop] = self._additional_properties(value, self._generate_path(prop), self._gentle_validation)
+
+        for prop in self._present_properties:
+            if hasattr(self.__class__, prop):
+                warning_text = (
+                    "An Schema class attribute overlaps with the mapping key \"{}\" "
+                    "located at \n{}"
+                ).format(
+                    prop,
+                    self._format_path()
+                )
+                warn(
+                    warning_text,
+                    OASpecParserWarning
+                )
+
+    def _validate_property(self, prop, return_class=True):
+        if prop in self._properties:
+            if return_class:
+                return "schema_property", self._properties[prop]
+            return True
+
+        for pattern, prop_class in self._pattern_properties.items():
+            if self._compiled_patterns[pattern].search(prop):
+                if return_class:
+                    return "pattern_property", prop_class
+                return True
+
+        if self._additional_properties is not False:
+            if prop == "$schema":
+                if return_class:
+                    return False, None
+                return False
+
+            if return_class:
+                return "additional_property", self._additional_properties
+            return True
+
+        if return_class:
+            return False, None
+        return False
+
+
+    def _set_object_methods(self):
+        self._keys = self.__keys__
+
+    def _amend(self, amendments_spec):
+        if isinstance(amendments_spec, Schema):
+            raise RuntimeError("Amending a spec with another spec is not currently supported")
+
+        if self._is_object():
+            for prop, amendments in amendments_spec.items():
+                if prop in self:
+                    self[prop]._amend(amendments)
+                    continue
+
+                prop_type, prop_class = self._validate_property(prop)
+                if isinstance(amendments, dict) and "__override" in amendments:
+                    if prop_class._is_primitive():
+                        amendments = amendments["__override"]
+                    elif prop_class._is_array():
+                        if isinstance(amendments["__override"], list):
+                            amendments = amendments["__override"]
+                        else:
+                            amendments = list(amendments["__override"])
+
+
+                self._present_properties.add(prop)
+                self._object_properties[prop] = prop_class(amendments, self._generate_path(prop), self._gentle_validation)
+        elif self._is_array():
+            revised_list = list()
+            delete_items = set()
+            for item in amendments_spec["__override"]:
+                if item == "__del *":
+                    delete_items = set(amendments_spec["__original"])
+                elif item.startswith("__del"):
+                    delete_items.add(item[6:])
+                else:
+                    revised_list.append(self._items(item, self._generate_path("array")))
+
+            for item in self._value:
+                if item in amendments_spec["__original"] or item in amendments_spec["__override"]:
+                    if item._value in delete_items:
+                        continue
+
+                    revised_list.append(item)
+
+            self._value = revised_list
+        elif self._is_primitive():
+            if amendments_spec["__override"]:
+                self._value = amendments_spec["__override"]
+
+    def _update(self, other, no_override=False):
+        self.__update(self, other, no_override)
+
+    @staticmethod
+    def __update(base, other, no_override=False):
+        for key in other:
+            if other[key]._is_primitive():
+                if key in base:
+                    base[key]._value = other[key]._value
+
+            elif other[key]._is_object():
+                if key in base:
+                    Schema.__update(base[key], other[key], no_override)
+
+    @classmethod
+    def _is_primitive(cls):
+        return cls._type in cls._PRIMITIVES or cls._type == "enum"
+
+    @classmethod
+    def _is_array(cls):
+        return cls._type == "array"
+
+    @classmethod
+    def _is_object(cls):
+        return cls._type == "object"
+
+    # def _serialize(self):
+    #     if self._is_primitive():
+    #         return
 
     @classmethod
     def validate(cls, spec, raise_on_failure=False):
@@ -122,6 +266,26 @@ class Schema(object):
         except Exception as e:
             raise e
 
+    def _generate_path(self, next_key):
+        new_path = deepcopy(self._path)
+        new_path.append(next_key)
+        return new_path
+
+    def _format_path(self):
+        path = []
+        for idx, key in enumerate(self._path):
+            if idx == 0:
+                path.append(f'\t "{key}"')
+            else:
+                path.append(
+                    '\t{}-> "{}"'.format(
+                        "  "*idx,
+                        key
+                    )
+                )
+
+        return "\n".join(path)
+
     def __getattr__(self, name):
         """Access the computed representation of a specification object.
 
@@ -134,11 +298,60 @@ class Schema(object):
         Returns:
             dict: A dict computed from properties present in the object as attributes.
         """
+
         if name == "_value":
-            # if self._type == "object" or getattr(self, "_present_properties", False):
-            return {key:getattr(self, key) for key in self._present_properties}
+            return self._object_properties
+        elif name == "_present_properties" or name == "_object_properties":
+            raise AttributeError(f"Property {name} not present")
+        elif name in self._object_properties:
+            return self._object_properties.get(name)
 
         raise AttributeError(f"Property {name} not present in specification")
+
+    def _raw(self):
+        if self._is_primitive():
+            return self._value
+        elif self._is_array():
+            return [item._raw() for item in self._value]
+        elif self._is_object():
+            return {
+                key:val._raw() for key, val in self._object_properties.items()
+            }
+        else:
+            print(self._value)
+            print(self._type)
+            print(self.__class__)
+            print(self._path)
+            raise RuntimeError()
+
+    def _dump_yaml(self, fp=None):
+        if not fp:
+            buffer = StringIO()
+            yaml.dump(self._raw(), buffer)
+            return buffer.getvalue()
+
+        if isinstance(fp, Path):
+            with fp.open("w", encoding="utf-8") as f:
+                yaml.dump(self._raw(), f)
+        elif isinstance(fp, IOBase):
+            yaml.dump(self._raw(), fp)
+
+    def _dump_json(self, fp=None):
+        if not fp:
+            return json.dumps(
+                self._raw(),
+                ensure_ascii=False,
+                indent=2,
+            )
+
+        if isinstance(fp, Path):
+            with fp.open("w", encoding="utf-8") as f:
+                json.dump(
+                    self._raw(),
+                    f,
+                    ensure_ascii=False,
+                    indent=2,
+                )
 
     def __repr__(self):
         return str(self._value)
@@ -148,98 +361,67 @@ class Schema(object):
 
     def __getitem__(self, key):
         if self._type == "object":
+            if hasattr(self, "_object_properties"):
+                if key in self._object_properties:
+                    return self._object_properties.get(key)
             return getattr(self, key)
         elif self._type == "array":
             return self._value[key]
 
         raise TypeError(f"{self.__name__} does not support indexing")
 
-def def_key(key):
-    """Compute a definition ref from a key.
+    def __contains__(self, key):
+        if hasattr(self, "_object_properties"):
+            return key in self._object_properties
 
-    Returns:
-        str: The computed relative reference
+        if self._is_array():
+            if isinstance(key, Schema):
+                key = key._value
 
-    """
-    return f"#/definitions/{key}"
+            return key in [item._value for item in self._value]
 
-def get_all_refs(schema):
-    """Get all ref links in a schema.
+        raise NotImplementedError("Object cannot check for contains")
 
-    Traverses a schema and extracts all relative ref links from the schema,
-    returning a set containing the results.
+    def __iter__(self):
+        if hasattr(self, "_object_properties"):
+            return iter(self._object_properties)
+        elif self._is_array():
+            return iter(self._value)
 
-    Parameters:
-        schema: An OAS schema in the form of nested dicts to be traversed.
+        raise NotImplementedError("Object is not iterable")
 
-    Returns:
-        set: All of the ref links found during traversal.
+    # def __dir__(self):
+    #     standard_attrs = {
+    #         "_value"
+    #     }
+    #     if self._type == "object":
+    #         return standard_attrs | self._object_properties.keys()
+    #     else:
+    #         return standard_attrs
+            # return super().__dir__()
 
-    """
+    def __keys__(self):
+        """Return the keys representing the properties present in this object.
 
-    all_refs = set()
+        This method creates a new dict from the intersection of keys present
+        in self.__dict__ and self._present_properties, and then calls the keys()
+        method on the newly created object. This is done to return a proper dict_view
+        that preserves the orders of keys in the object.
 
-    if type(schema) is dict:
-        for key, val in schema.items():
-            if key == "$ref" and type(val) is str:
-                all_refs.add(val)
+        Returns:
+            dict_keys: A dictview representing properties present in this schema object.
+        """
+        if self._type == "object":
+            return {
+                key:None for key in self.__dict__.keys()
+                if key in self._present_properties
+            }.keys()
+            # return self._present_properties
 
-            all_refs.update(get_all_refs(val))
-    elif type(schema) is list:
-        for item in schema:
-            all_refs.update(get_all_refs(item))
+        raise AttributeError("Class {} does not support keys".format(self.__name__))
 
-    return all_refs
 
-def get_def_classes(schema, def_objects, ignore_keys=None):
-    """Return the definition objects represented by relative refs in a schema.
-
-    Gets all of the relative refs present in a schema object and returns a mapping
-    of refs to schema objects, recursively resolving references listed in the
-    retrieved schema definitions. This function is used to collect the referenced
-    definitions that will be added to each schema class's `_parsing_schema` attribute.
-
-    Parameters:
-        schema: The schema to parse for relative refs.
-        def_objects: A mapping of relative ref keys and the Schema sub-classes to which they
-            correspond. The `_parsing_schema` will be extracted from each referenced class.
-        ignore_keys: A set of keys that should be skipped when encountered during traversal,
-            in order to prevent infinite recursion when encountering circular references.
-
-    Returns:
-        dict: A mapping of of relative ref keys and their corresponding raw definitions.
-
-    """
-
-    # Traverse the schema to get all relative ref links
-    all_refs = get_all_refs(schema)
-
-    if not all_refs:
-        return {}
-
-    def_classes = {}
-    for key in all_refs:
-        subkey = key.split("/")[-1]
-        if ignore_keys and subkey in ignore_keys:
-            continue
-
-        subschema = deepcopy(def_objects[key]._parsing_schema)
-
-        def_classes[subkey] = subschema
-
-        # Recursively de-reference ref links found in retrieve definition objects
-        def_classes.update(get_def_classes(def_classes[subkey], def_objects, def_classes.keys()))
-
-    return def_classes
-
-def schema_hash(schema):
-    """Generate a string-based hash of a schema object.
-
-    Returns:
-        str: Schema hash.
-
-    """
-    return str(abs(hash(str(schema))))
+# OASchema = type("openapiObject", (Schema,), dict())
 
 def build_schema(schema, schema_base, schema_class, object_defs=None):
     """Recursively build the Schema tree sub-classes for an entire OAS validation schema.

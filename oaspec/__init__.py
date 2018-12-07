@@ -29,3 +29,17 @@ from .spec import (
 __all__ = (
     "OASpecParser",
 )
+
+def main():
+    import pathlib
+    import json
+    spec_file = pathlib.Path("specs").resolve() / "git-oaspec-testing.json"
+    with spec_file.open("r", encoding="utf-8") as f:
+        spec = json.load(f)
+
+    del spec["$schema"]
+
+    parsed = OASpecParser(str(spec_file)).parse_spec()
+    print("Valid:", spec == parsed)
+    # print(dir(parsed.info))
+    # print(dir(parsed.info.description))

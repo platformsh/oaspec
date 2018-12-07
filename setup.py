@@ -40,6 +40,7 @@ setup(
     #add required packages to install_requires list
     install_requires=[
         "jsonschema==2.6.0",
+        "pyyaml",
     ],
     entry_points = {
         "console_scripts": ["oaspec = oaspec:main"]
