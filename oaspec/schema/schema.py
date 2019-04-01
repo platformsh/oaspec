@@ -36,15 +36,27 @@ class Schema(object):
         # other than False, detect which definition is present in the parsed
         # specification and reinitialize the object as the corresponding class
         if self._boolean_subschema:
+            # print("Raw spec name:", type(self._raw_spec).__name__, )
+            # if issubclass(type(self._raw_spec), Schema):
+            #     if type(self.)
+
             for subschema_cls in self._boolean_subschema_classes:
                 if subschema_cls.validate(self._raw_spec):
                     self.__class__ = subschema_cls
                     self.__init__(self._raw_spec, path, self._gentle_validation)
                     return
 
+
+            # print(self._raw_spec._raw_spec)
+            # print(self._boolean_subschema_classes)
+            # print(type(self._raw_spec).__name__)
+            # print(path)
             raise RuntimeError("Could not find matching subschema")
 
         self._path = deepcopy(path) if path else []
+
+        # if "type" in self._raw_spec:
+        #     print(self._path, self._raw_spec["type"], self._type)
 
         if self._type in self._PRIMITIVES:
             self._value = spec
@@ -68,8 +80,11 @@ class Schema(object):
         else:
             self._set_properties()
             self._set_object_methods()
+            # if len(self._path) > 2 and self._path[-2] == "ssh_keys":
+            #     exit()
 
     def _set_properties(self):
+        # print(self._path)
         # if not hasattr(self, "_present_properties"):
         self._present_properties = set()
         self._object_properties = dict()
@@ -89,6 +104,14 @@ class Schema(object):
             if prop in self._properties:
                 self._present_properties.add(prop)
                 self._object_properties[prop] = self._properties[prop](value, self._generate_path(prop), self._gentle_validation)
+                # if "ssh_keys" in self._path:
+                #     print(prop)
+                #     print(value)
+                #     print(self._object_properties[prop])
+                #     print(self._object_properties[prop]._raw_schema)
+                #     print(self._object_properties[prop]._type)
+                #     print(self._properties[prop])
+                #     print()
 
         # Set patterned properties by checking each key in the spec that hasn't
         # already been parsed and checking if it matches the pattern. Create
@@ -165,6 +188,12 @@ class Schema(object):
         if isinstance(amendments_spec, Schema):
             raise RuntimeError("Amending a spec with another spec is not currently supported")
 
+        # if self._path and self._path[-1] == "ssh_keys":
+            # print(self)
+            # print(self._id)
+            # print(self._parsing_schema)
+            # print(amendments_spec)
+            # exit()
         if self._is_object():
             for prop, amendments in amendments_spec.items():
                 if prop in self:
@@ -173,6 +202,9 @@ class Schema(object):
 
                 prop_type, prop_class = self._validate_property(prop)
                 if isinstance(amendments, dict) and "__override" in amendments:
+                    if not amendments["__override"]:
+                        continue
+
                     if prop_class._is_primitive():
                         amendments = amendments["__override"]
                     elif prop_class._is_array():
@@ -185,10 +217,13 @@ class Schema(object):
                 self._present_properties.add(prop)
                 self._object_properties[prop] = prop_class(amendments, self._generate_path(prop), self._gentle_validation)
         elif self._is_array():
+            # print(self._generate_path("array"))
             revised_list = list()
             delete_items = set()
             for item in amendments_spec["__override"]:
-                if item == "__del *":
+                if not item:
+                    continue
+                elif item == "__del *":
                     delete_items = set(amendments_spec["__original"])
                 elif item.startswith("__del"):
                     delete_items.add(item[6:])
@@ -207,19 +242,52 @@ class Schema(object):
             if amendments_spec["__override"]:
                 self._value = amendments_spec["__override"]
 
-    def _update(self, other, no_override=False):
-        self.__update(self, other, no_override)
+    def _update(self, other, no_override=False, overwrites_config=None):
+        self.__update(self, other, no_override, overwrites_config)
 
     @staticmethod
-    def __update(base, other, no_override=False):
+    def __update(base, other, no_override=False, overwrites_config=None):
+        allow_overwrite_subkeys = False
+        new_overwrites = None
         for key in other:
-            if other[key]._is_primitive():
-                if key in base:
-                    base[key]._value = other[key]._value
+            if overwrites_config:
+                if key in overwrites_config:
+                    if overwrites_config[key] == "__overwrite_subkeys":
+                        allow_overwrite_subkeys = True
+                    else:
+                        new_overwrites = overwrites_config[key]
 
-            elif other[key]._is_object():
-                if key in base:
-                    Schema.__update(base[key], other[key], no_override)
+            if key in base:
+                if base[key]._is_primitive():
+                    if no_override:
+                        continue
+
+                    base[key]._value = other[key]._value
+                elif base[key]._is_object():
+                    if not allow_overwrite_subkeys:
+                        if no_override:
+                            continue
+                    Schema.__update(base[key], other[key], no_override, new_overwrites)
+            else:
+                # print(key)
+                base[key] = other[key]
+
+    def __setitem__(self, key, value):
+
+        prop_type, prop_class = self._validate_property(key)
+
+        if prop_class.__name__ == type(value).__name__:
+            self._present_properties.add(key)
+            self._object_properties[key] = value
+        # elif check to see if the type value name is present in the bool
+        elif prop_class._boolean_subschema:
+            for subschema in prop_class._boolean_subschema_classes:
+                if subschema.__name__ == type(value).__name__:
+                    self._present_properties.add(key)
+                    self._object_properties[key] = value
+        else:
+            self._present_properties.add(key)
+            self._object_properties[key] = prop_class(value, self._generate_path(key), True)
 
     @classmethod
     def _is_primitive(cls):
@@ -318,11 +386,15 @@ class Schema(object):
                 key:val._raw() for key, val in self._object_properties.items()
             }
         else:
-            print(self._value)
-            print(self._type)
-            print(self.__class__)
-            print(self._path)
-            raise RuntimeError()
+            # print(self._path)
+            # print(self)
+            # print(self._type)
+            # print(self._value)
+            # print(self.__class__)
+            # print()
+            # return self._value
+            # raise RuntimeError()
+            pass
 
     def _dump_yaml(self, fp=None):
         if not fp:
@@ -412,10 +484,11 @@ class Schema(object):
             dict_keys: A dictview representing properties present in this schema object.
         """
         if self._type == "object":
-            return {
-                key:None for key in self.__dict__.keys()
-                if key in self._present_properties
-            }.keys()
+            # return {
+            #     key:None for key in self.__dict__.keys()
+            #     if key in self._present_properties
+            # }.keys()
+            return self._object_properties.keys()
             # return self._present_properties
 
         raise AttributeError("Class {} does not support keys".format(self.__name__))
@@ -445,7 +518,9 @@ def build_schema(schema, schema_base, schema_class, object_defs=None):
 
     # If the object is simply a ref link to another definition, return that class directly
     # rather than generating a new class. Passes the class by reference to be used in-place.
-    if schema.keys() == {"$ref": None}.keys():
+    # if schema.keys() == {"$ref": None}.keys():
+    #     return object_defs[schema["$ref"]]
+    if "$ref" in schema.keys():
         return object_defs[schema["$ref"]]
 
 
@@ -569,7 +644,6 @@ def build_schema(schema, schema_base, schema_class, object_defs=None):
         #    schema_class._raw_schema["properties"][prop] = subschema._raw_schema
         # else:
 
-
         # Create a name for the subclass based on the property name and the object
         # that it is within.
         prop_object_name = "".join([
@@ -603,6 +677,9 @@ def build_schema(schema, schema_base, schema_class, object_defs=None):
             "_items"
         ])
 
+        # print(items_object_name)
+        # print(schema["items"])
+        # print()
         schema_class._items = build_schema(
             schema["items"],
             schema_base,

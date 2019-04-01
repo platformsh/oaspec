@@ -16,7 +16,7 @@ class OASpecParserWarning(RuntimeWarning):
 
         error_msg = msg
         if location:
-            error_msg = "Issue at {}: {}".format(location, msg)
+            error_msg = "Issue is at {}: {}".format(location, msg)
 
         RuntimeWarning.__init__(self, error_msg)
 
