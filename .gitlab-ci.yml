@@ -1,0 +1,22 @@
+image: python:3.7-stretch
+stages:
+  - test
+  - deploy
+
+before_script:
+  - pip install --upgrade pip
+  - pip install setuptools wheel
+
+# test:
+#   stage: test
+#   script:
+#     - pip install pytest
+#     - pip install .
+
+deploy:
+  stage: deploy
+  script:
+    - python setup.py sdist bdist_wheel
+  artifacts:
+    paths:
+      - dist/*

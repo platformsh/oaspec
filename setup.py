@@ -41,6 +41,13 @@ setup(
     install_requires=[
         "jsonschema==2.6.0",
         "pyyaml",
+        "ruamel.yaml"
+    ],
+    setup_requires=[
+        "pytest-runner"
+    ],
+    tests_require=[
+        "pytest"
     ],
     entry_points = {
         "console_scripts": ["oaspec = oaspec:main"]
@@ -49,7 +56,7 @@ setup(
     #     "console_scripts": ['%s = %s.%s:main' % (__title__,projectName,projectName)]
     #     },
 #list of classifiers: https://pypi.python.org/pypi?%3Aaction=list_classifiers
-    classifiers=(
+    classifiers=[
         'Development Status :: 1 - Planning',
         'License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)',
         'Environment :: Console',
@@ -58,5 +65,5 @@ setup(
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3 :: Only'
-    ),
+    ],
 )
