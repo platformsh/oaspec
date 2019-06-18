@@ -13,10 +13,18 @@ before_script:
 #     - pip install pytest
 #     - pip install .
 
-deploy:
+sdist:
   stage: deploy
   script:
-    - python setup.py sdist bdist_wheel
+    - python setup.py sdist
   artifacts:
     paths:
-      - dist/*
+      - dist/*.tar.gz
+
+wheel:
+  stage: deploy
+  script:
+    - python setup.py bdist_wheel
+  artifacts:
+    paths:
+      - dist/*.whl
