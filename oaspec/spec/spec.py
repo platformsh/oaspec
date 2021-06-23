@@ -10,7 +10,6 @@ from typing import Optional, Union, MutableMapping
 
 # from collections.abc import MutableMapping as CollectionMutableMapping
 from ruamel.yaml.comments import CommentedMap
-import jsonschema
 
 from ..__version__ import __root_dir__
 from .. import schema
